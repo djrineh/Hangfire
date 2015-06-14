@@ -1,5 +1,9 @@
 ﻿using System;
+using System.Runtime.Serialization.Formatters;
 using Hangfire.Common;
+using Hangfire.Storage;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
 using Xunit;
 
 namespace Hangfire.Core.Tests.Common
@@ -112,6 +116,123 @@ namespace Hangfire.Core.Tests.Common
         {
             var result = JobHelper.DeserializeNullableDateTime(WellKnownTimestamp.ToString());
             Assert.Equal(WellKnownDateTime, result);
+        }
+
+        [Fact]
+        public void FromJson_WithObjectType_DecodesFromJsonString()
+        {
+            var result = (ClassA)JobHelper.FromJson(@"{ ""PropertyA"": ""hello"" }", typeof(ClassA));
+            Assert.Equal("hello", result.PropertyA);
+        }
+
+        [Fact]
+        public void ForSerializeUseDefaultConfigurationOfJsonNet()
+        {
+            var result = JobHelper.ToJson(new ClassA("A"));
+            Assert.Equal(@"{""PropertyA"":""A""}", result);
+        }
+
+        [Fact]
+        public void ForSerializeCanUseCustomConfigurationOfJsonNet()
+        {
+            try
+            {
+                JobHelper.SetSerializerSettings(new JsonSerializerSettings { ContractResolver = new CamelCasePropertyNamesContractResolver() });
+
+                var result = JobHelper.ToJson(new ClassA("A"));
+                Assert.Equal(@"{""propertyA"":""A""}", result);
+            }
+            finally
+            {
+                JobHelper.SetSerializerSettings(null);
+            }
+        }
+
+        [Fact]
+        public void ForDeserializeCanUseCustomConfigurationOfJsonNet()
+        {
+            try
+            {
+                JobHelper.SetSerializerSettings(new JsonSerializerSettings
+                {
+                    TypeNameHandling = TypeNameHandling.Objects
+                });
+
+                var result = (ClassA)JobHelper.FromJson<IClass>(@"{ ""$type"": ""Hangfire.Core.Tests.Common.JobHelperFacts+ClassA, Hangfire.Core.Tests"", ""propertyA"":""A"" }");
+                Assert.Equal("A", result.PropertyA);
+            }
+            finally
+            {
+                JobHelper.SetSerializerSettings(null);
+            }
+        }
+
+        [Fact]
+        public void ForDeserializeCanUseCustomConfigurationOfJsonNetWithInvocationData()
+        {
+            try
+            {
+                JobHelper.SetSerializerSettings(new JsonSerializerSettings
+                {
+                    TypeNameHandling = TypeNameHandling.All,
+                    TypeNameAssemblyFormat = FormatterAssemblyStyle.Simple
+                });
+
+                var method = typeof (BackgroundJob).GetMethod("DoWork");
+                var args = new[] {"123", "Test"};
+                var job = new Job(typeof(BackgroundJob), method, args);
+
+                var invocationData = InvocationData.Serialize(job);
+                var deserializedJob = invocationData.Deserialize();
+
+                Assert.Equal(typeof(BackgroundJob), deserializedJob.Type);
+                Assert.Equal(method, deserializedJob.Method);
+                Assert.Equal(args, deserializedJob.Arguments);
+            }
+            finally
+            {
+                JobHelper.SetSerializerSettings(null);
+            }
+        }
+
+        [Fact]
+        public void ForDeserializeWithGenericMethodCanUseCustomConfigurationOfJsonNet()
+        {
+            try
+            {
+                JobHelper.SetSerializerSettings(new JsonSerializerSettings
+                {
+                    TypeNameHandling = TypeNameHandling.Objects
+                });
+
+                var result = (ClassA)JobHelper.FromJson(@"{ ""$type"": ""Hangfire.Core.Tests.Common.JobHelperFacts+ClassA, Hangfire.Core.Tests"", ""propertyA"":""A"" }", typeof(IClass));
+                Assert.Equal("A", result.PropertyA);
+            }
+            finally
+            {
+                JobHelper.SetSerializerSettings(null);
+            }
+        }
+
+        private interface IClass
+        {
+        }
+
+        private class ClassA : IClass
+        {
+            public ClassA(string propertyA)
+            {
+                PropertyA = propertyA;
+            }
+
+            public string PropertyA { get; private set; }
+        }
+
+        private class BackgroundJob
+        {
+            public void DoWork(string workId, string message)
+            {
+            }
         }
     }
 }
